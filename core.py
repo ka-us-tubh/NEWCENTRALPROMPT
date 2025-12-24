@@ -148,6 +148,7 @@ class CentralPrompt:
         version: Optional[int] = None,
         path: Optional[str] = None,
         label: Optional[str] = None,
+        cache_ttl_seconds: Optional[int] = None,
     ) -> PromptHandle:
         if self.provider == "mlflow":
             target: Optional[str] = path
@@ -191,11 +192,21 @@ class CentralPrompt:
                 raise ValueError(
                     "For langfuse, provide either 'version' or 'label', not both"
                 )
+            if cache_ttl_seconds is not None and (
+                not isinstance(cache_ttl_seconds, int) or cache_ttl_seconds <= 0
+            ):
+                raise ValueError(
+                    "For langfuse, 'cache_ttl_seconds' must be a positive integer if provided"
+                )
             try:
+                kwargs: Dict[str, Any] = {}
+                if version is not None:
+                    kwargs["version"] = version
                 if label is not None:
-                    prompt_obj = client.get_prompt(name, version=version, label=label)
-                else:
-                    prompt_obj = client.get_prompt(name, version=version)
+                    kwargs["label"] = label
+                if cache_ttl_seconds is not None:
+                    kwargs["cache_ttl_seconds"] = cache_ttl_seconds
+                prompt_obj = client.get_prompt(name, **kwargs)
             except Exception as e:
                 raise PromptFetchError(
                     f"Langfuse get_prompt failed for '{name}': {e}"
@@ -282,6 +293,15 @@ class PromptHandle:
             ) from e
         raise PromptProviderError("Unsupported provider; use 'mlflow' or 'langfuse'")
 
+    @property
+    def config(self) -> Any:
+        """Expose the underlying prompt's config, if available (e.g., Langfuse).
+
+        For Langfuse prompts, this mirrors `prompt = langfuse.get_prompt(...); prompt.config`.
+        For providers or objects without a `config` attribute, this returns None.
+        """
+        return getattr(self.underlying, "config", None)
+
 
 def _ensure_mlflow(
     tracking_uri: Optional[str], experiment: Optional[str], *, load_env: bool = False
@@ -352,4 +372,3 @@ def _ensure_langfuse(load_env: bool = True):
         return _LangfuseClient(public_key=public_key, secret_key=secret_key)
     except Exception as e:
         raise ImportError(f"Failed to initialize Langfuse client: {e}") from e
-
